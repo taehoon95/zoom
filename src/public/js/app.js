@@ -1,92 +1,133 @@
-const socket = io(); // io는 자동적으로 back-end socket.iio와 연결해주는 function 
-                     // 전에는 websocket이 있었는데 지금은 그냥 socketIO 의 socket
-                     // SocketIO는 이미 room 기능이 있음
+const socket = io(); 
 
-const welcome = document.getElementById("welcome");
-const form = welcome.querySelector("form");
-const room = document.getElementById("room");
+const myFace = document.getElementById("myFace");
+const muteBtn = document.getElementById("mute"); 
+const cameraBtn = document.getElementById("camera");
+const camerasSelect = document.getElementById("cameras");
 
-room.hidden = true;
 
+const call = document.getElementById("call");
+
+// call : 카메라 사용
+call.hidden = true;
+
+// stream은 비디오와 오디오가 결합된것
+// stream의 멋진점 track이라는 것을 제공 (비디오 track, 오디오 track, 자막 track)하고 접근도 가능
+let myStream;
+let muted = false;
+let cameraOff = false;
 let roomName;
 
-function addMessage(message){
-    const ul = room.querySelector("ul");
-    const li = document.createElement("li");
-    li.innerText = message;
-    ul.appendChild(li);
+// async : 비동기 키워드
+// async function()은 await 키워드가 비동기 코드를 호출할 수 있게 해주는 함수
+// 이제 코드가 Promise를 반환
+async function getCameras(){
+    try{
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cameras = devices.filter(device => device.kind === "videoinput")
+        const option =  document.createElement("option");
+        const currentCamera = myStream.getVideoTracks()[0].label;
+        console.log(currentCamera);
+        cameras.forEach(camera => {
+            option.value = camera.deviceId;
+            option.innerText = camera.label;
+            if(currentCamera === camera.label){
+                option.selected = true;
+            }
+            camerasSelect.appendChild(option);
+        })
+    }catch(e){
+        console.log(e);
+    }
 }
 
-function handleMessageSubmit(event){
-    event.preventDefault();
-    const input = room.querySelector("#msg input");
-    const value = input.value;
-    socket.emit("new_message", input.value, roomName, () => {
-        addMessage(`You: ${value}`);
-    });
-    input.value = "";
+async function getMedia(deviceId) {
+    const initialConstrains = {
+        audio : true,
+        video : { facingMode : "user"},
+    };
+    const cameraConstraints = {
+        audio : true,
+        video : { deviceId: { exact: deviceId }} // 꼭 내가 지정한 비디오를 사용할때 exact 사용
+    }
+    try {
+        myStream = await navigator.mediaDevices.getUserMedia(
+            deviceId ? cameraConstraints : initialConstrains
+        );
+        myFace.srcObject = myStream;
+        if(!deviceId){
+            await getCameras();
+        }
+    } catch(e) {
+        console.log(e);
+    }
 }
 
-function handleNicknameSubmit(event){
-    event.preventDefault();
-    const input = room.querySelector("#name input"); //querySelector 항상 첫번째것만 가져옴
-    socket.emit("nickname", input.value);
+// getMedia();
+
+function handleMuteClick() {
+    console.log(myStream.getAudioTracks())
+    myStream
+        .getAudioTracks()
+        .forEach((track) => (track.enabled = !track.enabled));
+    if(!muted){
+        muteBtn.innerText = "Unmute";
+        muted = true;
+    } else {
+        muteBtn.innerText = "Mute";
+        muted = false;
+    }
+}
+function handleCameraClick() {
+    console.log(myStream.getVideoTracks())
+    myStream
+        .getVideoTracks()
+        .forEach((track) => (track.enabled = !track.enabled));
+    if(cameraOff){
+        cameraBtn.innerText = "Turn Camera Off";
+        cameraOff = false;
+    }else{
+        cameraBtn.innerText = "Turn Camera On";
+        cameraOff = true;
+    }
 }
 
-function showRoom(){
+// getMedia fucntion에 사용하려는 특정 카메라 id를 전송
+async function handleCameraChange(){
+    await getMedia(camerasSelect.value);
+}
+
+muteBtn.addEventListener("click", handleMuteClick);
+cameraBtn.addEventListener("click", handleCameraClick);
+camerasSelect.addEventListener("input", handleCameraChange); // 두개 이상 있어야 감지
+
+// webRTC web Real-Time Communication : 실시간 커뮤니케이션을 가능하게 해주는 기술, peer-to-peer 연결 가능
+// 이때까지 chat한 방식 : A가 B에게 메시지를 서버에 보내는 경우 A는 서버에게 메시지를 보내고 서버는 A가 보낸 메시지를 B에게 보내준다. (서버에 비용이 많이든다.)
+// peer-to-peer : A가 B에게 메시지를 보내는 경우 A의 영상과 오디오 텍스트가 서버로 가지 않는다. 즉 직접 B로 간다. (signaling을 하기위해 서버가 필요하긴(브라우저로 하여금 서버는 상대가 어디에 있는지 알게 하는 용도) 하지만 영상이나 오디오를 전송하기 위해 필요하진않다.)
+
+// welcome Form (join a room)
+
+const welcome = document.getElementById("welcome");
+const welcomeForm = welcome.querySelector("form");
+
+function startMedia(){
     welcome.hidden = true;
-    room.hidden = false;
-    const h3 = room.querySelector("h3");
-    h3.innerText = `Room ${roomName}`;
-    const msgForm = room.querySelector("#msg");
-    const nameForm = room.querySelector("#name");
-    msgForm.addEventListener("submit", handleMessageSubmit);
-    nameForm.addEventListener("submit", handleNicknameSubmit);
+    call.hidden = false;
+    getMedia();
 }
 
-function handleRoomSubmit(event){
+function handleWelcomeSubmit(event){
     event.preventDefault();
-    const input = form.querySelector("input");
-    // 1. 특정한 event를 emit 
-    // 2. 전송할때 아무거나 전송 가능 (object 포함)
-    // emit 과 on은 같은 이름(같은 String) "enter_room"
-    // 첫번째 argument(여기서는 JSON object로 보냄) : {payload : input.value}
-    // 두번째 argument : function
-    socket.emit("enter_room", { payload:input.value },showRoom); // object를 string으로 변환 시킬 필요 없이 사용가능
+    const input = welcomeForm.querySelector("input");
+    socket.emit("join_room", input.value, startMedia);
     roomName = input.value;
     input.value = "";
 }
 
-form.addEventListener("submit", handleRoomSubmit);
+welcomeForm.addEventListener("submit", handleWelcomeSubmit);
 
-// 방안의 사람수 작성 : welcome과 byed에 반복되는 문장 있어서 만듬 
-function textCount(newCount){
-    const h3 = room.querySelector("h3");
-    h3.innerText = `Room ${roomName} (${newCount})`;
-}
+// Socket Code
 
-socket.on("welcome", (user ,newCount) => {
-    textCount(newCount)
-    addMessage(`${user} arrived!`); 
+socket.on("welcome", () => {
+    console.log("someone joined")
 })
-
-socket.on("bye", (left ,newCount) => {
-    textCount(newCount)
-    addMessage(`${left} left ㅠㅠ`); 
-})
-
-socket.on("new_message", addMessage);
-// (msg) => addMessage(msg) 랑 addMessage 똑같이 작동
-
-socket.on("room_change", (rooms) => {
-    const roomList = welcome.querySelector("ul");
-    roomList.innerHTML = "";
-    if(rooms.length === 0){
-        return
-    }
-    rooms.forEach((room) => {
-        const li = document.createElement("li");
-        li.innerText = room;  
-        roomList.append(li)
-    });
-});
