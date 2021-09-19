@@ -1,9 +1,7 @@
 import http from "http";
 import express from "express";
-import SocketIO from "socket.io";
-import { Socket } from "dgram";
-import { type } from "os";
-import { parse } from "path";
+import { Server } from "socket.io";
+import { instrument } from "@socket.io/admin-ui"
 
 const app = express();
 // pug 페이지 랜더링
@@ -20,7 +18,16 @@ app.get("/*", (req, res) => res.redirect("/"));
 
 
 const httpServer = http.createServer(app); // 먼저 내 http서버에 access /server-> httpServer 이름만 바꿈
-const wsServer = SocketIO(httpServer); // io -> wsServer 이름만 바꿈
+const wsServer = new Server(httpServer, {
+    cors: {
+        origin: ["https://admin.socket.io"],
+        credentials: true,
+    },
+}); // io -> wsServer 이름만 바꿈
+
+instrument(wsServer, {
+    auth: false
+})
 
 // public rooms를 주는 function
 // sids와 rooms의 차이
