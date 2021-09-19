@@ -17,6 +17,7 @@ let myStream;
 let muted = false;
 let cameraOff = false;
 let roomName;
+let myPeerConnection;
 
 // async : 비동기 키워드
 // async function()은 await 키워드가 비동기 코드를 호출할 수 있게 해주는 함수
@@ -110,10 +111,11 @@ camerasSelect.addEventListener("input", handleCameraChange); // 두개 이상 �
 const welcome = document.getElementById("welcome");
 const welcomeForm = welcome.querySelector("form");
 
-function startMedia(){
+async function startMedia(){
     welcome.hidden = true;
     call.hidden = false;
-    getMedia();
+    await getMedia();
+    makeConnection();
 }
 
 function handleWelcomeSubmit(event){
@@ -131,3 +133,13 @@ welcomeForm.addEventListener("submit", handleWelcomeSubmit);
 socket.on("welcome", () => {
     console.log("someone joined")
 })
+
+// RTC Code
+function makeConnection(){
+    // Peer to Peer 연결 만들고
+    myPeerConnection = new RTCPeerConnection();
+
+    // 양쪽 브라우저에서 카메라, 마이크 데이터 stream을 받아서 그것들을 연결 안에 집어 넣었다.
+    myStream.getTracks()
+    .forEach((track) => myPeerConnection.addTrack(track, myStream));
+}
