@@ -1,6 +1,6 @@
 import http from "http";
-import WebSocket from "ws";
 import express from "express";
+import SocketIO from "socket.io";
 import { Socket } from "dgram";
 import { type } from "os";
 import { parse } from "path";
@@ -18,52 +18,72 @@ app.use("/public", express.static(__dirname + "/public"));
 app.get("/", (req, res) => res.render("home"));
 app.get("/*", (req, res) => res.redirect("/"));
 
-const handleListen = () => console.log(`Listening on http://localhost:3000`);
-//포트 3000번
-// app.listen(3000, handleListen);
 
-// ws와 http를 같이 사용
-const server = http.createServer(app); //내 http서버에 access
-const wss = new WebSocket.Server({ server }); //내 wss서버에 access
+const httpServer = http.createServer(app); // 먼저 내 http서버에 access /server-> httpServer 이름만 바꿈
+const wsServer = SocketIO(httpServer); // io -> wsServer 이름만 바꿈
 
-// 백엔드에서 이벤트 socket이 frontend와 실시간으로 소통할 수 있다.
-// server.js의 socket은 연결된 브라우저
-
-// fake database : 누군가 서버에 연결하면, 그 connection을 여기에 넣는다.
-const sockets = [];
-
-// backend와 연결된 각 브라우저에 대해 작동 (연결이 되면 알려주는 부분) , 연결될때 마다 작동(다른 브라우저에서) 
-wss.on("connection", (socket) => {
-    sockets.push(socket); // 연결 될때 마다 sockets 배열에 저장 -> 이렇게 하면 받은 메세지를 다른 모든 socket에 전달 가능
-    console.log("Connected to Browser ✅");
-
-    socket["nickname"] = "Anon"; // nickname없을 때 "Anon"사용
-
-    // socket에서 event를 listen
-    // 브라우저 꺼졌을때
-    socket.on("close", () => console.log("Disconnected to Server ❌"));
-
-    // message 보내기
-    // 백엔드는 메세지를 구분하지 못함 -> 그냥 모두에게 메세지를 보낼뿐
-    // 구별해주는 방법이 필요 (nickname을 정하는 메세지와 다른 사람들에게 보내는 메세지) -> 메세지 type같은 것을 만들어야 함 -> type: message chat, nickname
-    // 우선 메세지 보내는 input이 있는 form에 id 추가(닉네임 추가 하는 곳 과 메세지보내는 곳)
-    socket.on("message", (msg) => {
-        // socket.send(message.toString()); // message.toString() 안해주면 /blob값으로 들어간다.
-        const message = JSON.parse(msg);
-        switch(message.type) {
-            case "new_message" : 
-                sockets.forEach((aSocket) => aSocket.send(`${socket.nickname}: ${message.payload}`)); // 연결된 브라우저로 모두 보내기 가능
-            case "nickname" :
-                socket["nickname"] = message.payload; // socket은 객체이므로 socket에 새로운 item을 추가 할 수 있다. (nickname이란 item 추가)
+// public rooms를 주는 function
+// sids와 rooms의 차이
+// private rooms들은 sids와 rooms의 값이 같고 public rooms는 다르다.
+function publicRooms(){
+    // const sids = wsServer.sockets.adapter.sids;
+    // const rooms = wsServer.sockets.adapter.rooms; 아래 코드와 동일
+    // 아래코드는 위코드를 비구조화 할당 한것이다.
+    // 비구조화 할당 장점 : 한번에 깊숙이 있는 값들을 출력할수 있다. (여기서는 sids와 rooms)
+    const {
+        sockets: {
+            adapter: { sids, rooms}
         }
-        
-    });
+    } = wsServer;
+    const publicRooms = [];
+    rooms.forEach((_, key) => {
+        if(sids.get(key) === undefined){
+            publicRooms.push(key);
+        }
+    })
+    return publicRooms;
+}
 
-});
+// 방에 들어온 사람수 count
+function countRoom(roomName){
+    // if(wsServer.sockets.adapter.rooms.get(roomName)){
+    //     return wsServer.sockets.adapter.rooms.get(roomName).size
+    //     } else {
+    //     return undefined;
+    // } => 아래 코드와 동일
+    return wsServer.sockets.adapter.rooms.get(roomName)?.size;
+}
 
-server.listen(3000, handleListen);
+wsServer.on("connection", socket => {
+    socket["nickname"] = "Anon";
+    socket.onAny((event) => {
+        // console.log(wsServer.sockets.adapter);
+        // console.log(`Socket Event: ${event}`);
+    })
+    socket.on("enter_room", (roomName,done) => {
+        socket.join(roomName.payload); // 방에 들어가기 위해서 join함수 쓰면됨
+        done();
+        socket.to(roomName.payload).emit("welcome" , socket.nickname, countRoom(roomName.payload)); // welcome 이벤트를 roomName에 있는 모든 사람들에게 emit
+        wsServer.sockets.emit("room_change", publicRooms()); // 모든 메세지를 모든 socket에 보내줌
+    });    
+    socket.on("disconnecting" , () => {
+        socket.rooms.forEach( room => socket.to(room).emit("bye", socket.nickname, countRoom(room) - 1))
+    })
+    socket.on("disconnect", () => {
+        wsServer.sockets.emit("room_change", publicRooms());
+    })
+    socket.on("new_message", (msg, room, done) => {
+        socket.to(room).emit("new_message", `${socket.nickname}: ${msg}`);
+        done(); //done()이 백엔드에서 호출되면 프론트에서 코드 실행
+    })
+    socket.on("nickname" , nickname => socket["nickname"] = nickname)
+    
+})
 
-// JSON으로 채팅 타입 구분
-
-
-
+const handleListen = () => console.log(`Listening on http://localhost:3000`);
+httpServer.listen(3000, handleListen);
+            
+            
+            
+            
+            
