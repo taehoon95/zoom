@@ -26,13 +26,12 @@ async function getCameras(){
     try{
         const devices = await navigator.mediaDevices.enumerateDevices();
         const cameras = devices.filter(device => device.kind === "videoinput")
-        const option =  document.createElement("option");
-        const currentCamera = myStream.getVideoTracks()[0].label;
-        console.log(currentCamera);
+        const currentCamera = myStream.getVideoTracks()[0];
         cameras.forEach(camera => {
+            const option =  document.createElement("option");
             option.value = camera.deviceId;
             option.innerText = camera.label;
-            if(currentCamera === camera.label){
+            if(currentCamera.label === camera.label){
                 option.selected = true;
             }
             camerasSelect.appendChild(option);
@@ -67,7 +66,6 @@ async function getMedia(deviceId) {
 // getMedia();
 
 function handleMuteClick() {
-    console.log(myStream.getAudioTracks())
     myStream
         .getAudioTracks()
         .forEach((track) => (track.enabled = !track.enabled));
@@ -111,17 +109,20 @@ camerasSelect.addEventListener("input", handleCameraChange); // 두개 이상 �
 const welcome = document.getElementById("welcome");
 const welcomeForm = welcome.querySelector("form");
 
-async function startMedia(){
+async function initCall(){
     welcome.hidden = true;
     call.hidden = false;
     await getMedia();
     makeConnection();
 }
 
-function handleWelcomeSubmit(event){
+async function handleWelcomeSubmit(event){
     event.preventDefault();
     const input = welcomeForm.querySelector("input");
-    socket.emit("join_room", input.value, startMedia);
+    // web Socket들의 속도가 media를 가져오는 속도나 연결을 만드는 속도보다 빠르다. 
+    // 그래서 getMedia 하고 makeConnection을 한다음에 이벤트를 emit해야 한다.
+    await initCall();
+    socket.emit("join_room", input.value);
     roomName = input.value;
     input.value = "";
 }
@@ -130,16 +131,70 @@ welcomeForm.addEventListener("submit", handleWelcomeSubmit);
 
 // Socket Code
 
-socket.on("welcome", () => {
-    console.log("someone joined")
+// Peer A에서 돌아가는 코드
+// 1. Peer A에서 offer를 만들고 setLocalDescription하고 Peer B로 offer를 보낸다.
+socket.on("welcome", async () => {
+    const offer = await myPeerConnection.createOffer();
+    myPeerConnection.setLocalDescription(offer);
+    console.log("sent offer")
+    socket.emit("offer", offer, roomName);    
+})
+
+// 다른 브라우저인 Peer B에서 돌아가는 코드
+// 3.Peer A에서 보낸 offer를 Peer B가 받아서 remoteDescription을 설정 후 answer를 보냄
+socket.on("offer", async(offer) => {
+    console.log("received the offer");
+    myPeerConnection.setRemoteDescription(offer);
+    const answer = await myPeerConnection.createAnswer();
+    myPeerConnection.setLocalDescription(answer);
+    socket.emit("answer", answer, roomName);    
+    console.log("sent the answer");
+})
+
+// 5.Peer B에서 보낸 answer로 Peer A에서 remoteDescription을 가지게 되었다.
+socket.on("answer", answer => {
+    console.log("received the offer");
+    myPeerConnection.setRemoteDescription(answer);
+})
+
+socket.on("ice", ice => {
+    console.log("received candidate");
+    myPeerConnection.addIceCandidate(ice);
 })
 
 // RTC Code
+
+
 function makeConnection(){
     // Peer to Peer 연결 만들고
     myPeerConnection = new RTCPeerConnection();
+    myPeerConnection.addEventListener("icecandidate", handleIce);
+    myPeerConnection.addEventListener("addstream", handleAddStream);
 
-    // 양쪽 브라우저에서 카메라, 마이크 데이터 stream을 받아서 그것들을 연결 안에 집어 넣었다.
+    // track들을 개별적으로 추가해주는 함수
+    // 양쪽 브라우저에서 카메라, 마이크 데이터 stream을 받아서 그것들을 연결 후 안에 집어 넣었다.
     myStream.getTracks()
-    .forEach((track) => myPeerConnection.addTrack(track, myStream));
+    .forEach(track => myPeerConnection.addTrack(track, myStream));
+}
+
+// offer와 answer을 가지고, 그걸 받는걸 모두 끝냈을 때
+// peer-to-peer 연결의 양쪽에서 icecandidate라는 이벤트를 실행하기 시작한다.
+// icecandidate(Internet Connectivity Establishment(인터넷 연결 생성)candidate) 뜻?   
+// IceCandidate는 webRTC에 필요한 프로토콜을 의미하는데 멀리 떨어진 장치와 소통할 수 있게 하기 위함이다. -> 브라우저가 서로 소통할 수 있게 해주는 방법
+// 어떤 소통방법이 가장 좋을 것인지 제안할 때 사용
+// 다수의 candidate(후보)들이 각각의 연결에서 제안되고 그들은 서로의 동의 하에 하나를 선택한다. 그리고 그것을 소통 방식에 사용한다.
+// 그리고 candidate들을 다시 다른 브라우저로 보낸다.(왜냐 소통하는 방법들인 이 candidate들은 각자의 브라우저들에 의해 만들어지지만 다른 브라우저로 전송되지는 않으므로)
+// Peer A , Peer B 서로서로 보내야 한다.
+
+
+// ice를 받으면 그 icecandidate를 우리 서버로 보내겠다는 뜻
+// Peer A와 Peer B 브라우저가 candidate들을 서로 주고 받는다는 뜻
+function handleIce(data){
+    console.log("sent candidate");
+    socket.emit("ice", data.candidate, roomName);
+}
+
+function handleAddStream(data){
+    const peerFace = document.getElementById("peerFace");
+    peerFace.srcObject = data.stream;
 }
