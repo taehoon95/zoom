@@ -18,6 +18,7 @@ let muted = false;
 let cameraOff = false;
 let roomName;
 let myPeerConnection;
+let myDataChannel;
 
 // async : 비동기 키워드
 // async function()은 await 키워드가 비동기 코드를 호출할 수 있게 해주는 함수
@@ -50,6 +51,8 @@ async function getMedia(deviceId) {
         audio : true,
         video : { deviceId: { exact: deviceId }} // 꼭 내가 지정한 비디오를 사용할때 exact 사용
     }
+
+    // devoceId로 여기서 새로운 스트림을 만든다.
     try {
         myStream = await navigator.mediaDevices.getUserMedia(
             deviceId ? cameraConstraints : initialConstrains
@@ -91,10 +94,20 @@ function handleCameraClick() {
     }
 }
 
-// getMedia fucntion에 사용하려는 특정 카메라 id를 전송
+// getMedia fucntion에 사용하려는 특정 카메라 id를 전송하여 새로운 스트림을 생성
 async function handleCameraChange(){
     await getMedia(camerasSelect.value);
+    // 선택한 새 장치로 업데이트 된 video track을 받는다.
+    if(myPeerConnection){
+        const videoTrack = myStream.getVideoTracks()[0];
+        const videoSender = myPeerConnection
+            .getSenders()
+            .find((sender) => sender.track.kind === "video");
+        videoSender.replaceTrack(videoTrack);
+    } 
 }
+// Sender는 peer로 보내진 media stream track을 컨트롤하게 해준다.
+
 
 muteBtn.addEventListener("click", handleMuteClick);
 cameraBtn.addEventListener("click", handleCameraClick);
@@ -134,6 +147,9 @@ welcomeForm.addEventListener("submit", handleWelcomeSubmit);
 // Peer A에서 돌아가는 코드
 // 1. Peer A에서 offer를 만들고 setLocalDescription하고 Peer B로 offer를 보낸다.
 socket.on("welcome", async () => {
+    myDataChannel = myPeerConnection.createDataChannel("chat");
+    myDataChannel.addEventListener("message", console.log);
+    console.log("made data channel");
     const offer = await myPeerConnection.createOffer();
     myPeerConnection.setLocalDescription(offer);
     console.log("sent offer")
@@ -143,6 +159,10 @@ socket.on("welcome", async () => {
 // 다른 브라우저인 Peer B에서 돌아가는 코드
 // 3.Peer A에서 보낸 offer를 Peer B가 받아서 remoteDescription을 설정 후 answer를 보냄
 socket.on("offer", async(offer) => {
+    myPeerConnection.addEventListener("datachannel", (event) => {
+        myDataChannel = event.channel;
+        myDataChannel.addEventListener("message", console.log);
+    });
     console.log("received the offer");
     myPeerConnection.setRemoteDescription(offer);
     const answer = await myPeerConnection.createAnswer();
@@ -167,7 +187,19 @@ socket.on("ice", ice => {
 
 function makeConnection(){
     // Peer to Peer 연결 만들고
-    myPeerConnection = new RTCPeerConnection();
+    myPeerConnection = new RTCPeerConnection({
+        iceServers: [
+            {
+                urls:[
+                    "stun:stun.l.google.com:19302",
+                    "stun:stun1.l.google.com:19302",
+                    "stun:stun2.l.google.com:19302",
+                    "stun:stun3.l.google.com:19302",
+                    "stun:stun4.l.google.com:19302",
+                ],
+            },
+        ],
+    });
     myPeerConnection.addEventListener("icecandidate", handleIce);
     myPeerConnection.addEventListener("addstream", handleAddStream);
 
@@ -175,6 +207,8 @@ function makeConnection(){
     // 양쪽 브라우저에서 카메라, 마이크 데이터 stream을 받아서 그것들을 연결 후 안에 집어 넣었다.
     myStream.getTracks()
     .forEach(track => myPeerConnection.addTrack(track, myStream));
+
+    // 카메라를 바꾸는게 적용 되지 않아서 여기서 서로다른 ID로 새로운 stream을 만든다.
 }
 
 // offer와 answer을 가지고, 그걸 받는걸 모두 끝냈을 때

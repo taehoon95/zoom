@@ -39,3 +39,7 @@ wsServer.on("connection", socket => {
 
 const handleListen = () => console.log('Listening on http://localhost:3000')
 httpServer.listen(3000, handleListen);
+
+// 컴퓨터랑 폰이 같은 wifi에 있지 않으면 에러 생긴다.
+// 그래서 STUN 서버를 사용한다.
+// STUN 서버는 컴퓨터가 공용 IP주소를 찾게 해준다.   
