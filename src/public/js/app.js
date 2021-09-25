@@ -6,6 +6,7 @@ const cameraBtn = document.getElementById("camera");
 const camerasSelect = document.getElementById("cameras");
 
 
+
 const call = document.getElementById("call");
 
 // call : 카메라 사용
@@ -144,11 +145,13 @@ welcomeForm.addEventListener("submit", handleWelcomeSubmit);
 
 // Socket Code
 
+
+
 // Peer A에서 돌아가는 코드
 // 1. Peer A에서 offer를 만들고 setLocalDescription하고 Peer B로 offer를 보낸다.
 socket.on("welcome", async () => {
     myDataChannel = myPeerConnection.createDataChannel("chat");
-    myDataChannel.addEventListener("message", console.log);
+    myDataChannel.addEventListener("message", showChat);
     console.log("made data channel");
     const offer = await myPeerConnection.createOffer();
     myPeerConnection.setLocalDescription(offer);
@@ -156,12 +159,14 @@ socket.on("welcome", async () => {
     socket.emit("offer", offer, roomName);    
 })
 
+
+
 // 다른 브라우저인 Peer B에서 돌아가는 코드
 // 3.Peer A에서 보낸 offer를 Peer B가 받아서 remoteDescription을 설정 후 answer를 보냄
 socket.on("offer", async(offer) => {
     myPeerConnection.addEventListener("datachannel", (event) => {
         myDataChannel = event.channel;
-        myDataChannel.addEventListener("message", console.log);
+        myDataChannel.addEventListener("message", showChat);
     });
     console.log("received the offer");
     myPeerConnection.setRemoteDescription(offer);
@@ -231,4 +236,32 @@ function handleIce(data){
 function handleAddStream(data){
     const peerFace = document.getElementById("peerFace");
     peerFace.srcObject = data.stream;
+}
+
+// 채팅용
+const chatContainer = document.getElementById("chatContainer");
+const chatForm = document.getElementById("chatForm");
+
+function addMessage(message){
+    const ul = chatContainer.querySelector("ul");
+    const li = document.createElement("li");
+    li.innerText = message;
+    li.style.listStyle = "none";
+    ul.appendChild(li);
+}
+
+chatForm.addEventListener("submit", handleChatForm);
+
+function handleChatForm(event){
+    event.preventDefault();
+    const input = chatForm.querySelector("input")
+    const message = input.value
+    addMessage(`You : ${message}`)
+    input.value = ""
+    myDataChannel.send(message);
+}
+
+function showChat(message) {
+    // const parsed = JSON.parse(message.data)
+    addMessage(`Other : ${message.data}`);
 }
